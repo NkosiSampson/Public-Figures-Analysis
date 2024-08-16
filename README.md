@@ -1,0 +1,1 @@
+The public_figures.csv file contains information about 226 20th and 21st-century public figures. Please read the `public_figures_dictionary` file on on GitHub for a more complete description of the variables. The objective of this project is to build a model to predict the likability rating of a public figure, based primarily on their personality.
