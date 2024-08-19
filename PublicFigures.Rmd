@@ -1,0 +1,540 @@
+---
+title: "Public Figures"
+author: "Nkosi Sampson"
+date: "2024-08-15"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries and data, message = FALSE, warning = FALSE}
+# Packages 
+library(tidyverse)
+library(tidymodels)
+library(tidyverse)
+library(tidymodels)
+library(recipes)
+library(broom)
+library(tidyclust)
+library(mclust)
+library(dplyr)
+library(probably)
+library(pROC)
+library(ModelMetrics)
+library(MASS) # LDA 
+# Data 
+
+# Regression Problem
+public_figures <- readr::read_csv("public_figures.csv")
+```
+
+
+
+
+
+The public_figures.csv file contains information about 226 20th and 21st-century public figures. Please read the `public_figures_dictionary` file on on GitHub for a more complete description of the variables. The objective of this project is to build a model to predict the likability rating of a public figure, based primarily on their personality.
+
+# EDA 
+
+Immediately split data into a training set (75% of the rows) and test set (remaining 25%).
+
+```{r}
+set.seed(1)
+pf_split <- initial_split(public_figures, prop = 0.75)
+pf_train <- training(pf_split)
+pf_test <- testing(pf_split)
+```
+
+Ask questions about this dataset 
+
+
+*1. What industry is the most liked on average?*
+```{r}
+ggplot(aes(x = industry, y = likability), data = public_figures) + stat_summary(fun.y = "mean", geom = "bar") + theme(axis.text.x = element_text(angle = 90))
+```
+*Surprisingly, Natural Sciences is at the top. I would expect "Team Sports" or "Film and Theater" to be at the top, because those are the things people are most engrossed in out of all these, in my experience. Maybe it's because while "Team Sports" and "Film and Theater" have the highest ratings, they also have some of the lowest ratings because there are some athletes and film and theater people who have some very undesirable attributes that are revealed because they are in the spotlight, whereas for people in the natural sciences, their personalities aren't always under the microscope, so people can't say many bad things about them. *
+
+*2. Of the favorable attributes, who has higher scores out of those in the "Team Sports", "Film and Theater", and "Natural Sciences" industries?*
+*For the favorable attributes, I will use the ones that are clearly favorable : `TIPI_1`:"Extroverted, enthusiastic", `TIPI_3`: "Dependable, self-disciplined", `TIPI_7`: "Sympathetic, warm", `TIPI_9`: "Calm, emotionally stable"
+```{r}
+
+
+FilmTheatre <- public_figures %>% 
+  filter(industry == "FILM AND THEATRE")
+TeamSports <- public_figures %>% 
+  filter(industry == "TEAM SPORTS")
+NaturalSciences <- public_figures %>% 
+  filter(industry == "NATURAL SCIENCES")
+
+
+# Determine the overall y-axis limits
+y_limits_TIPI_1 <- range(c(FilmTheatre$TIPI_1, TeamSports$TIPI_1, NaturalSciences$TIPI_1), na.rm = TRUE)
+y_limits_TIPI_3 <- range(c(FilmTheatre$TIPI_3, TeamSports$TIPI_3, NaturalSciences$TIPI_3), na.rm = TRUE)
+y_limits_TIPI_7 <- range(c(FilmTheatre$TIPI_7, TeamSports$TIPI_7, NaturalSciences$TIPI_7), na.rm = TRUE)
+y_limits_TIPI_9 <- range(c(FilmTheatre$TIPI_9, TeamSports$TIPI_9, NaturalSciences$TIPI_9), na.rm = TRUE)
+
+# TIPI_1
+par(mfrow = c(1,3))
+boxplot(FilmTheatre$TIPI_1, xlab = "Film and Theatre", ylab = "TIPI_1", ylim = y_limits_TIPI_1)
+boxplot(TeamSports$TIPI_1, xlab = "Team Sports", ylab = "TIPI_1", ylim = y_limits_TIPI_1)
+boxplot(NaturalSciences$TIPI_1, xlab = "Natural Sciences", ylab = "TIPI_1", ylim = y_limits_TIPI_1)
+
+# TIPI_3
+par(mfrow = c(1,3))
+boxplot(FilmTheatre$TIPI_3, xlab = "Film and Theatre", ylab = "TIPI_3", ylim = y_limits_TIPI_3)
+boxplot(TeamSports$TIPI_3, xlab = "Team Sports", ylab = "TIPI_3", ylim = y_limits_TIPI_3)
+boxplot(NaturalSciences$TIPI_3, xlab = "Natural Sciences", ylab = "TIPI_3", ylim = y_limits_TIPI_3)
+
+# TIPI_7
+par(mfrow = c(1,3))
+boxplot(FilmTheatre$TIPI_7, xlab = "Film and Theatre", ylab = "TIPI_7", ylim = y_limits_TIPI_7)
+boxplot(TeamSports$TIPI_7, xlab = "Team Sports", ylab = "TIPI_7", ylim = y_limits_TIPI_7)
+boxplot(NaturalSciences$TIPI_7, xlab = "Natural Sciences", ylab = "TIPI_7", ylim = y_limits_TIPI_7)
+
+# TIPI_9
+par(mfrow = c(1,3))
+boxplot(FilmTheatre$TIPI_9, xlab = "Film and Theatre", ylab = "TIPI_9", ylim = y_limits_TIPI_9)
+boxplot(TeamSports$TIPI_9, xlab = "Team Sports", ylab = "TIPI_9", ylim = y_limits_TIPI_9)
+boxplot(NaturalSciences$TIPI_9, xlab = "Natural Sciences", ylab = "TIPI_9", ylim = y_limits_TIPI_9)
+
+
+```
+*These results make sense. For `TIPI_1`: "Extroverted, enthusiastic", I would expect athletes and actors/actresses to be seen as having this quality more than those in the natural sciences. For `TIPI_3`: "Dependable, self-disciplined", I would expect those in the natural sciences and team sports to be seen as more dependable and self disciplined than those in acting, because self-discipline is crucial for maintaining peak physical condition, and dependability is needed to become well-known int he natural sciences. For `TIPI_7`: "Sympathetic, warm", I don;t picture people in the natural sciences as warm and sympathetic, becasue we generally don;t see that side of people who are famous for that profession. I would expect to see those in the film and theater occupation as the clear leader for this category, but here the results are pretty similar. For `TIPI_9`: "Calm, emotionally stable", we see that natural sciences far surpasses the other two categories, because even if these people are not calm and emotionally stable, we generally don't see that type of behavior publicized. *
+
+
+*3. I'll bet that as age increases for those in the "TEAM SPORTS" or "INDIVIDUAL SPORTS" categories, likability increases faster than in the "NATURAL SCIENCES" category, because I feel like people like retired athletes much more than active athletes, because retired athletes can't threaten your team's playoffs hopes and aren't always in the headlines for doing bad stuff on the field/court. *
+
+```{r}
+pfq4 <- public_figures %>% 
+  filter(industry == "TEAM SPORTS" |
+           industry == "INDIVIDUAL SPORTS" |
+           industry == "NATURAL SCIENCES") %>% 
+  dplyr::select(industry, likability, birthyear)
+
+ggplot(pfq4, aes(x = birthyear, y = likability, color = industry)) + geom_point()
+```
+*There is a problem with a lack of observations for the `NATURAL SCIENCES` industry, which explains why their median rating for `TIPI_1` is so high. As it relates to my hypothesis from this question, the likability for those in Team Sports does seem to increase with age slightly, mostly due to a couple of points near the top left corner, and the likability of those in Natural Sciences also seems to increase with age, but again, there's only 3 samples, so it's hard to make any judgments on this. Also, there's a clear outlier in the bottom of the graph. I wonder what athlete is disliked that much? Mike Tyson for biting Evander Holyfield's ear?*
+
+```{r}
+filter(public_figures, 
+       likability < -50 & industry == "TEAM SPORTS")
+```
+*That makes sense. I guess a lot of people think he was guilty of the crime he was charged with.*
+
+4. *I think that girls will have higher ratings for "Sympathetic, warm" than guys, because girls usually act that way more than guys. I will check overall male/female comparison.
+
+```{r}
+
+Male <- public_figures %>% 
+  filter(gender == "Male")
+Female <- public_figures %>% 
+  filter(gender == "Female")
+
+
+# Determine the overall y-axis limits for TIPI_7
+y_limits_TIPI_7 <- range(c(Male$TIPI_7, Female$TIPI_7), na.rm = TRUE)
+
+# Create the boxplots with the same scale
+par(mfrow = c(1,2))  # Adjust to c(1,2) since there are two plots
+boxplot(Male$TIPI_7, xlab = "Male", ylab = "TIPI_7", ylim = y_limits_TIPI_7)
+boxplot(Female$TIPI_7, xlab = "Female", ylab = "TIPI_7", ylim = y_limits_TIPI_7)
+
+```
+
+
+*As expected, the females tend to have higher rating for `TIPI_7` than do makes. We will check among each industry, though, because the disparities in some industries could make the difference in rating seem more pronounced than it actually is. *
+
+
+```{r}
+ggplot(public_figures, aes(x = industry, y = TIPI_7, fill = gender)) + 
+  geom_bar(position = "dodge", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(y = "Average TIPI_7 Score")
+
+```
+*For 3/7 categories that have males and females, the average rating for "`TIPI_7`: "Sympathetic, warm" was higher for females than it was for males. In the "LANGUAGE" category, the `TIPI_7` rating is considerable higher for females compared to males, and in the other industries where there is a difference, the difference is very small. Therefore, it's likely that this industry is the main contributor to the overall difference we see in the `TIPI_7` rating between males and females. Surprisingly, there were no females in the "NATURAL SCIENCES" and "DESIGN" category, because I know there are a lot of important women in those 2 categories.*
+
+
+*5. In general, how does the variability of likability progress with age? I feel like on average, younger people tend to be observed more than older people in the media, so i feel like the older people in the dataset will have less variability on average than younger people in the data set. *
+
+```{r}
+plot(public_figures$birthyear, public_figures$likability)
+min(public_figures$birthyear)
+```
+
+```{r}
+public_figures_1 <- filter(public_figures, birthyear >= 1900 & birthyear <= 1920)
+
+public_figures_2 <- filter(public_figures, birthyear > 1920 & birthyear <= 1940)
+
+public_figures_3 <- filter(public_figures, birthyear > 1940 & birthyear <= 1960)
+
+public_figures_4 <- filter(public_figures, birthyear > 1960 & birthyear <= 1980)
+
+public_figures_1 <- filter(public_figures, birthyear > 1980 & birthyear <= 2000)
+
+var(public_figures_1$likability)
+var(public_figures_2$likability)
+var(public_figures_3$likability)
+var(public_figures_4$likability)
+```
+*So the variance of likability is much higher for those born from 1920-1960 than for those born from 1900-1920 and 1980-2000. Of course, that lends to the question of why were those people from 1900-1920 that were selected selected. They probably wouldn't have been be selected if they were just popular for a short amount of time, like I'm sure a lot of the people who are younger are. For example, no one is gonna forget an Adolf Hitler for a long time, but i bet it won't be long before people forget who Megan Fox is. *
+
+# PCA 
+
+Continue exploratory data analysis by performing a principal component analysis on all 10 `TIPI` variables.
+
+```{r}
+pfigures <- public_figures %>% 
+  dplyr::select(name, TIPI_1, TIPI_2, TIPI_3, TIPI_4, TIPI_5, TIPI_6, TIPI_7, TIPI_8, TIPI_9, TIPI_10)
+```
+
+```{r step_pca}
+pca_recipe <- recipe(
+  ~ ., data = pfigures
+) |>
+## ~ . indicates to use all variables in the dataset as predictors
+   update_role(name, new_role = "id") |>
+  step_normalize(all_numeric_predictors()) |>
+  step_pca(all_predictors(), num_comp = 10)
+```
+
+```{r prep pca recipe}
+pca_prep <- pca_recipe |>
+  prep()
+pca_prep
+```
+
+```{r bake pca recipe}
+pca_baked <- pca_prep |>
+  bake(new_data = NULL)
+pca_baked
+```
+
+```{r extract loadings}
+pca_tidy <- tidy(pca_prep, 2, type = "coef") # tidy step 3 - the PCA step
+head(pca_tidy, 20)
+```
+
+```{r plot loadings with ggplot2}
+pca_tidy |>
+  filter(component %in% c("PC1", "PC2")) |>
+  ggplot(aes(x = value, y = terms, fill = abs(value))) +
+  geom_col() +
+  theme(legend.position = "none") +
+  scale_fill_gradient(low = "black", high = "red") +
+  facet_wrap(vars(component))
+```
+
+```{r get loadings out}
+pca_loadings <- pca_tidy |>
+  pivot_wider(names_from = "component",
+              values_from = "value") |>
+  dplyr::select(!id)
+arrange(pca_loadings, desc(abs(PC1)))
+arrange(pca_loadings, desc(abs(PC2)))
+```
+
+*Based on the descriptions of the variables in the data dictionary, the first principal component represents public figures who are viewed as either having non-favorable personality traits or favorable, as there are strong positive coefficients for unfavorable value like `Anxious, easily upset` and `Critical, quarrelsome` and strong negative coefficients for `Calm, emotionally stable` and `Sympathetic, warm`. High positive scores for PC1 correspond to non-favorable attributes, and high negative scores on PC1 correspond to favorable attributes. *
+
+*Principal Component 2 tells shows us the public figures who are either very extroverted or very introverted, because these are the two qualities that have massive coefficients. High positive scores for PC2 correspond to extrovert qualities, as `TIPI_1` is "Extroverted, enthusiastic" and `TIPI_5` is "Open to new experiences, complex". High negative scores correspond to introverted qualities, as `TIPI_6` is "Reserved, quiet" and `TIPI_10` is "Conventional, uncreative". *
+
+
+* If I want to reduce the 10 TIPI variables, how many principal components should I choose?
+
+```{r tidy pve}
+pca_pve <- tidy(pca_prep, type = "variance", number = 2) # Step 3 - PCA step
+
+filter(pca_pve, (component == "1" |
+           component == "2" |
+           component == "3") & 
+           terms == "percent variance")
+
+
+ggplot(pca_pve |> filter(terms == "cumulative percent variance"),
+       aes(x = component, y = value)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept = 80, color = "red") + 
+  labs(x = "Number of PCs",
+       y = "Cumulative Percent Variance Explained")
+
+``` 
+
+*3 principal components is appropriate to interpret the data, because that is the minimum amount of principal components such that the cumulative PVE is >= 80%. *
+
+# Cluster Analysis
+
+Continue exploratory data analysis by performing a cluster analysis using the `TIPI` variables.
+
+```{r}
+kmeans_recipe <- recipe(~ TIPI_6 + TIPI_7 + TIPI_8 + TIPI_9 + TIPI_10, 
+                           data = pf_train) |>
+  step_YeoJohnson(all_numeric_predictors()) |> # deal with skew issues
+  step_zv(all_predictors()) 
+```
+
+```{r}
+kmeans_model <- k_means(num_clusters = tune()) |>
+  set_args(nstart = 20)
+```
+
+
+```{r}
+kmeans_wflow <- workflow() |>
+  add_model(kmeans_model) |>
+  add_recipe(kmeans_recipe)
+```
+
+
+```{r tune kmeans}
+set.seed(1002)
+kfold_tidy <- vfold_cv(pf_train, v = 5, repeats = 1) 
+# grid is now expected to be a tibble or data frame instead of a list of named parameters
+nclusters_grid <- data.frame(num_clusters = seq(1, 10))
+
+kmeans_tuned <- tune_cluster(kmeans_wflow,
+                                resamples = kfold_tidy,
+                                metrics = cluster_metric_set(sse_total, 
+                                                             sse_within_total, sse_ratio),
+                                grid = nclusters_grid)
+
+tuned_metrics <- collect_metrics(kmeans_tuned)
+
+tuned_metrics |>
+  arrange(desc(.metric), num_clusters) |>
+  dplyr::select(num_clusters, .metric, mean, everything())
+```
+
+### Choosing the Number of Clusters
+```{r scree plots}
+tuned_metrics |>
+  filter(.metric == "sse_ratio") |>
+  ggplot(aes(x = num_clusters, y = mean)) +
+  geom_point() + 
+  geom_line() +
+  labs(x = "Number of Clusters", y = "Mean WSS/TSS (5 folds)") +
+  scale_x_continuous(breaks = seq(1, 10))
+```
+
+```{r create nutritional matrix}
+pfigures_clust <- public_figures |>
+  dplyr::select(TIPI_6, TIPI_7, TIPI_8, TIPI_9, TIPI_10) 
+
+x.matrix <- model.matrix(~ TIPI_6 + TIPI_7 + TIPI_8 + TIPI_9 + TIPI_10, data = public_figures)[,-1]
+```
+
+
+```{r}
+kmeans_wflow <- workflow() |>
+  add_model(kmeans_model) |>
+  add_recipe(kmeans_recipe)
+```
+
+```{r finalize kmeans workflow}
+kmeans_4clusters <- kmeans_wflow |>
+  finalize_workflow_tidyclust(parameters = list(num_clusters = 3))
+```
+
+```{r fit 3 cluster model}
+set.seed(56685) 
+# always reset the seed before you re-fit, just in case something weird happens
+
+kmeans_fit4 <- kmeans_4clusters |>
+  fit(data = public_figures)
+```
+
+
+```{r cluster assignments3}
+assignments4 <- bind_cols(
+  public_figures,
+  kmeans_fit4 |> extract_cluster_assignment())
+
+assignments4 |>
+  dplyr::select(name, .cluster, everything())
+```
+
+```{r plot clusters3, message = F, warning = F}
+library(GGally)
+ggpairs(assignments4, columns = c("TIPI_6", "TIPI_7", "TIPI_8", "TIPI_9", "TIPI_10"),
+        aes(color = .cluster, alpha = 0.3))
+```
+
+*How many clusters best grouped the people in the training set? *
+
+*I chose to use 3 clusters because the total mean WSS/TSS is at 0.25 at 3 clusters, and doesn't significantly decrease as the number of clusters increases from there. *
+
+
+*In the green cluster, it includes people who are rated as not being* `Sympathetic, warm`*, not being *`calm, emotionally stable`*, and being *`disorganized, careless` 
+
+# LASSO Model
+
+Fit a least absolute shrinkage and selection operator (LASSO) model
+
+```{r Lasso-tidy model}
+lasso_model <- linear_reg(mode = "regression", engine = "glmnet",
+                          penalty = tune(), # let's tune the lambda penalty term
+                          mixture = 1) # mixture = 1 specifies pure LASSO
+
+lasso_wflow <- workflow() |>
+  add_model(lasso_model)
+```
+
+```{r lasso-tidy recipe}
+lasso_recipe <- recipe(
+  likability ~   gender + birthyear + n_raters + TIPI_1 + TIPI_2 + TIPI_3 + TIPI_4 + TIPI_5 + TIPI_6 + TIPI_7 + TIPI_8 + TIPI_9 + TIPI_10, # response ~ predictors
+  data = pf_train
+) |>
+  step_normalize(all_numeric_predictors()) |> # don't scale the response
+  step_dummy(all_nominal_predictors())
+
+lasso_wflow <- lasso_wflow |>
+  add_recipe(lasso_recipe)
+```
+
+```{r}
+set.seed(2)
+pf_cv <- vfold_cv(pf_train, v = 10)
+
+
+lasso_tune1 <- tune_grid(lasso_model, 
+                      lasso_recipe, 
+                      resamples = pf_cv)
+```
+
+```{r}
+# Check results
+results1 <- collect_metrics(lasso_tune1)
+print(results1)
+```
+
+```{r select best lasso}
+lasso_best <- lasso_tune1 |>
+  select_by_one_std_err(
+    metric = "rmse",
+    desc(penalty) # order penalty from largest (highest bias = simplest model) to smallest
+)
+lasso_best
+
+lasso_wflow_final <- lasso_wflow |>
+  finalize_workflow(parameters = lasso_best) 
+```
+
+# Random Forests Model
+
+```{r}
+rfR_model <- rand_forest(mode = "regression", engine = "ranger") |>
+  set_args(seed = 395,
+           importance = "permutation",
+           mtry = tune()
+  )
+
+rfR_recipe <- recipe(
+  likability ~  gender + birthyear + n_raters + TIPI_1 + TIPI_2 + TIPI_3 + TIPI_4 + TIPI_5 + TIPI_6 + TIPI_7 + TIPI_8 + TIPI_9 + TIPI_10,
+  data = pf_train
+)
+
+
+rfR_wflow <- workflow() |>
+  add_model(rfR_model) |>
+  add_recipe(rfR_recipe)
+```
+
+
+```{r tune model kfold rfR}
+
+pf_kfold <- vfold_cv(pf_train, v = 5, repeats = 3) 
+
+n_predictors <- sum(rfR_recipe$var_info$role == "predictor")
+manual_grid <- expand.grid(mtry = seq(2, n_predictors))
+
+rfR_tune1 <- tune_grid(rfR_model, 
+                      rfR_recipe, 
+                      resamples = pf_kfold, 
+                      grid = manual_grid)
+```
+
+```{r select best rf}
+rfR_best <- select_by_one_std_err(
+  rfR_tune1,
+  metric = "rmse",
+  mtry
+)
+rfR_best
+```
+
+```{r}
+rfR_wflow_final <- finalize_workflow(rfR_wflow, parameters = rfR_best) 
+rfR_fit <- fit(rfR_wflow_final, data = pf_train)
+
+
+rfR_engine <- rfR_fit |>
+  extract_fit_engine()
+rfR_engine |> pluck("prediction.error")
+
+rfR_pred_check <- tibble(
+  likability = pf_train$likability,
+  .pred = rfR_engine |> pluck("predictions")
+)
+
+ggplot(rfR_pred_check, aes(x = likability, y = .pred)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "blue")
+```
+
+```{r}
+pf_predictions <- broom::augment(rfR_fit,
+                                   new_data = pf_train)
+mse(pf_predictions$likability, pf_predictions$.pred)
+```
+
+
+### LASS Fitting
+
+Fit LASSO model on the (full) training set and make predictions on the holdout set. Evaluate the quality of the holdout set predictions 
+
+```{r lasso calibration check}
+lasso_wflow_final <- lasso_wflow |>
+  finalize_workflow(parameters = lasso_best) 
+
+lasso_pred_check <- lasso_wflow_final |>
+  fit_resamples(
+    resamples = pf_cv,
+    # save the cross-validated predictions
+    control = control_resamples(save_pred = TRUE)
+) |> 
+  collect_predictions()
+
+# using built-in defaults from probably
+cal_plot_regression(
+  lasso_pred_check,
+  truth = likability,
+  estimate = .pred
+)
+
+```
+
+*As seen by the calibration plot, it's predictions very closely align with the actual values for most of the observations. However, for those predicted as less likable ( -75 to -25), these predictions are not as accurate. They are not horribly off, but the model predicts these people to be rated as more likable than they actually are rated. *
+
+```{r fit lasso-tidy model}
+lasso_fit <- lasso_wflow_final |>
+  fit(data = pf_train)
+```
+
+```{r augment lasso fit}
+predictions_lasso <- lasso_fit |>
+  broom::augment(new_data = pf_test)
+predictions_lasso |>
+  dplyr::select(
+    likability, 
+    .pred
+)
+mse(predictions_lasso$likability, predictions_lasso$.pred)
+
+```
+
